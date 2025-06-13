@@ -20,7 +20,7 @@ class mg:
         for i in range(0, coarse_dof):
             #施密特正交化
             for k in range(0,i):
-                P_null_vec_coarse[i,:,:,:] -= cp.vdot(P_null_vec_coarse[i,:,:,:],P_null_vec_coarse[k,:,:,:])/cp.vdot(P_null_vec_coarse[k,:,:,:],P_null_vec_coarse[k,:,:,:])*P_null_vec_coarse[k,:,:,:]
+                P_null_vec_coarse[i,:,:,:] -= cp.vdot(cp.conj(P_null_vec_coarse[i,:,:,:]),P_null_vec_coarse[k,:,:,:])/cp.vdot(cp.conj(P_null_vec_coarse[k,:,:,:]),P_null_vec_coarse[k,:,:,:])*P_null_vec_coarse[k,:,:,:]
 
             #Ar
             Ar = lattice.apply_mat(P_null_vec_coarse[i,:,:,:], coarse_op)
@@ -35,15 +35,15 @@ class mg:
 
             #施密特正交化
             for k in range(0,i):
-                P_null_vec_coarse[i,:,:,:] -= cp.vdot(P_null_vec_coarse[i,:,:,:],P_null_vec_coarse[k,:,:,:])/cp.vdot(P_null_vec_coarse[k,:,:,:],P_null_vec_coarse[k,:,:,:])*P_null_vec_coarse[k,:,:,:]
+                P_null_vec_coarse[i,:,:,:] -= cp.vdot(cp.conj(P_null_vec_coarse[i,:,:,:]),P_null_vec_coarse[k,:,:,:])/cp.vdot(cp.conj(P_null_vec_coarse[k,:,:,:]),P_null_vec_coarse[k,:,:,:])*P_null_vec_coarse[k,:,:,:]
 
-            print("after",P_null_vec_coarse[i,:,0,0])
-            print(lattice.apply_mat(P_null_vec_coarse[i,:,:,:], op = coarse_op)[:,0,0])
+            # P_null_vec_coarse[i,:] = cp.zeros_like(P_null_vec_coarse[i,:])
+            P_null_vec_coarse[i,:] = P_null_vec_coarse[i,:]/cp.sqrt(cp.vdot(cp.conj(P_null_vec_coarse[i,:]), P_null_vec_coarse[i,:]))
+            if i==0:
+                print("after",P_null_vec_coarse[i,:])
+            # print(lattice.apply_mat(P_null_vec_coarse[i,:,:,:], op = coarse_op)[:,0,0])
 
         return P_null_vec_coarse
-    
-    def fermi_f2c(self, fermi, fine_op, coarse_op):
-        return 0
     
     def vol_index_dof_to_cv_index(self, i, i_dof, coarse_op):
         return coarse_op.nc*i + i_dof
@@ -90,7 +90,34 @@ class mg:
             for i_dof in range(0,nevc):
                 cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_leve+1])
                 for j in range(0, fine_sites_per_coarse):
-                    fermi_out[cv_index] = fermi_out[cv_index] + np.conj(self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]])*fermi_in[self.coarse_map[fine_leve][i][j]]
+                    fermi_out[cv_index] += np.conj(self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]])*fermi_in[self.coarse_map[fine_leve][i][j]]
+
+    def prolong_c2f(self, fine_leve, fermi_in, fermi_out, nevc, fine_sites_per_coarse):
+        for i in range(0,self.mg_ops[fine_leve+1].volume):
+            for i_dof in range(0,nevc):
+                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_leve+1])
+                for j in range(0, fine_sites_per_coarse):
+                    fermi_out[self.coarse_map[fine_leve][i][j]] += self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]]*fermi_in[cv_index]
+
+    def local_orthogonalization(self, fine_leve, nevc, fine_sites_per_coarse):
+        for i in range(0,self.mg_ops[fine_leve+1].volume):
+            for i_dof in range(1,nevc):
+                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_leve+1])
+                for k in (0,i_dof):
+                    k_dot = 0
+                    k_i_dof_dot = 0
+                    for j in range(0, fine_sites_per_coarse):
+                        k_dot += np.conj(self.R_null_vec[fine_leve][k][self.coarse_map[fine_leve][i][j]])*self.R_null_vec[fine_leve][k][self.coarse_map[fine_leve][i][j]]
+                        k_i_dof_dot += np.conj(self.R_null_vec[fine_leve][k][self.coarse_map[fine_leve][i][j]])*self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]]
+                    for j in range(0, fine_sites_per_coarse):
+                        self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]] -= self.R_null_vec[fine_leve][k][self.coarse_map[fine_leve][i][j]] * k_i_dof_dot / k_dot
+
+
+
+
+    def fermi_f2c(self, fermi, fine_op, coarse_op):
+        return 0
+    
 
     def __init__(self, fine_op, n_refine, ifeigen=0):
         self.n_refine = n_refine
@@ -106,13 +133,14 @@ class mg:
                 P_null_vec_coarse = cp.random.rand(self.coarse_dof[i], nx, ny, nc*2, dtype=cp.float64).view(cp.complex128)
                 # print(P_null_vec_coarse[7,:,:,:])
                 P_null_vec_coarse = self.near_null_vec(P_null_vec_coarse, self.coarse_dof[i], fine_op)
-                self.R_null_vec.append(P_null_vec_coarse.reshape(P_null_vec_coarse.shape[0],-1))######################################
-                print(P_null_vec_coarse.shape)
-                print(cp.sum(cp.vdot(P_null_vec_coarse[0,:,:,:], P_null_vec_coarse[1,:,:,:])))
+                P_null_vec_coarse = P_null_vec_coarse.reshape(P_null_vec_coarse.shape[0],-1)
+                self.R_null_vec.append(P_null_vec_coarse)######################################
+
                 
                 rand_fermi =  cp.random.rand(nx, ny, nc*2, dtype=cp.float64).view(cp.complex128)
                 rand_fermi =  cp.zeros_like(rand_fermi)
-                rand_fermi[0,0,0] = 1000
+                rand_fermi =  cp.ones_like(rand_fermi)
+                # rand_fermi[0,0,0] = 1000
                 # print(P_null_vec_coarse[1,:,:,:])
 
                 nx = int(nx/self.blocksize[i])
@@ -122,8 +150,11 @@ class mg:
 
                 map = [[int(0)]*int(self.blocksize[i]*self.blocksize[i]*nc_c)] * int(nx*ny)
                 fine_sites_per_coarse = int(self.blocksize[i]*self.blocksize[i]*nc_c)
+
                 map = np.array(map)
-                self.coarse_map.append(map)######################################
+                self.coarse_map.append(map)######################################         
+
+
 
                 coarse_op = lattice.operator_para(U, nx, ny, nc)
                 self.mg_ops.append(coarse_op)
@@ -132,13 +163,25 @@ class mg:
                 print(self.coarse_map[i])
                 print(len(np.unique(self.coarse_map[i])) < len(self.coarse_map[i]))
 
+                self.local_orthogonalization(i, self.coarse_dof[i], fine_sites_per_coarse)
                 
-                fermi_out = cp.random.rand(nx, ny, nc*2, dtype=cp.float64).view(cp.complex128).reshape(-1)
+                
+                fermi_out = cp.random.rand(nx, ny, nc*2, dtype=cp.float64).view(cp.complex128).reshape((nx,ny,nc))
                 fermi_out = cp.zeros_like(fermi_out)
-                self.restrict_f2c( i, rand_fermi.reshape(-1), fermi_out, self.coarse_dof[i], fine_sites_per_coarse)
+                fermi_out[0,0,0] = 1
+                fermi_out[0,1,0] = 1
+                fermi_out[1,0,0] = 1
+                fermi_out[1,1,0] = 1
+                fermi_out = fermi_out.reshape(-1)
+                fermi_out_pr = cp.zeros_like(fermi_out)
+                fermi_out_r = cp.zeros_like(rand_fermi)
+                # self.restrict_f2c( i, rand_fermi.reshape(-1), fermi_out, self.coarse_dof[i], fine_sites_per_coarse)
+                self.prolong_c2f( i, fermi_out.reshape(-1), fermi_out_r.reshape(-1), self.coarse_dof[i], fine_sites_per_coarse)
+                self.restrict_f2c( i, fermi_out_r.reshape(-1), fermi_out_pr, self.coarse_dof[i], fine_sites_per_coarse)
                 print(rand_fermi)
                 print(fermi_out.reshape(self.mg_ops[i+1].nx,self.mg_ops[i+1].ny,self.mg_ops[i+1].nc))
-
+                print(fermi_out_r.reshape(self.mg_ops[i].nx,self.mg_ops[i].ny,self.mg_ops[i].nc))
+                print(fermi_out_pr.reshape(self.mg_ops[i+1].nx,self.mg_ops[i+1].ny,self.mg_ops[i+1].nc))
 
                 
 

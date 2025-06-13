@@ -38,7 +38,7 @@ def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
         Ap = lattice.apply_mat(p, op)
         
         # 计算步长 alpha
-        alpha = cp.vdot(r0, r) / cp.vdot(r0, Ap)
+        alpha = cp.vdot(cp.conj(r0), r) / cp.vdot(cp.conj(r0), Ap)
         # print("alpha = ", alpha)
                 
         x += alpha * p
@@ -55,7 +55,7 @@ def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
         t = lattice.apply_mat(r, op)
         
         # 计算 omega
-        omega = cp.vdot(t, r) / cp.vdot(t, t)
+        omega = cp.vdot(cp.conj(t), r) / cp.vdot(cp.conj(t), t)
         
         # 更新解 x
         x += omega * r_1
@@ -68,7 +68,7 @@ def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
             return x
         
         # 计算 beta
-        beta = (cp.vdot(r_1, r_1) / cp.vdot(r, r)) 
+        beta = (cp.vdot(cp.conj(r_1), r_1) / cp.vdot(cp.conj(r), r)) 
         
         # 更新搜索方向 p
         p = r_1 + alpha*beta/omega*p - alpha*beta*Ap
