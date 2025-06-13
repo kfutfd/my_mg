@@ -31,7 +31,9 @@ class operator_para:
         self.ny = ny
         self.nc = nc
         self.U = U
-        self.volume = nx*ny*nc
+        self.volume = nx*ny
+
+
 
 
 

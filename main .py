@@ -2,7 +2,7 @@ import lattice
 import mg
 import cupy as cp
 import bicgstab
-nx = 256
+nx = 4
 ny = nx
 nc = 2
 
@@ -16,7 +16,7 @@ fine_op = lattice.operator_para(U, nx, ny, nc)
 
 V = cp.random.rand(nx,ny,nc*2, dtype=cp.float64).view(cp.complex128)
 
-my_mg = mg.mg(fine_op, 2)
+my_mg = mg.mg(fine_op, 1)
 
 
 Vout = lattice.apply_mat(V,fine_op)
