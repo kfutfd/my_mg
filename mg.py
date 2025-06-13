@@ -12,7 +12,7 @@ class mg:
     blocksize = [2, 2, 2, 2, 2, 2] #每一层的单个方向的压缩程度
     coarse_dof = [4, 12, 12, 12, 12, 12] #新一层的内禀维度
     R_null_vec = [] #
-    fine_info = []
+    mg_ops = []
     coarse_map = []
 
     #生成近零空间向量
@@ -86,22 +86,21 @@ class mg:
                 count[0] = count[0] + 1
 
     def restrict_f2c(self, fine_leve, fermi_in, fermi_out, nevc, fine_sites_per_coarse):
-        for i in range(0,self.fine_info[fine_leve+1].volume):
+        for i in range(0,self.mg_ops[fine_leve+1].volume):
             for i_dof in range(0,nevc):
-                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.fine_info[fine_leve+1])
+                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_leve+1])
                 for j in range(0, fine_sites_per_coarse):
                     fermi_out[cv_index] = fermi_out[cv_index] + np.conj(self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]])*fermi_in[self.coarse_map[fine_leve][i][j]]
 
-    def __init__(self, fine_size, n_refine, ifeigen=0):
-        self.fine_size = fine_size
+    def __init__(self, fine_op, n_refine, ifeigen=0):
         self.n_refine = n_refine
-        U = self.fine_size.U
-        nx = self.fine_size.nx
-        ny = self.fine_size.ny
-        nc = self.fine_size.nc
+        self.fine_op = fine_op
+        U = self.fine_op.U
+        nx = self.fine_op.nx
+        ny = self.fine_op.ny
+        nc = self.fine_op.nc
         if(ifeigen == 0):
-            fine_op = lattice.operator_para(U, nx, ny, nc)
-            self.fine_info.append(fine_op)######################################
+            self.mg_ops.append(fine_op)######################################
             for i in range(0,n_refine):
 
                 P_null_vec_coarse = cp.random.rand(self.coarse_dof[i], nx, ny, nc*2, dtype=cp.float64).view(cp.complex128)
@@ -127,7 +126,7 @@ class mg:
                 self.coarse_map.append(map)######################################
 
                 coarse_op = lattice.operator_para(U, nx, ny, nc)
-                self.fine_info.append(coarse_op)
+                self.mg_ops.append(coarse_op)
                 self.build_mapping( i, fine_op, coarse_op)
                 print(self.coarse_map[i].shape)
                 print(self.coarse_map[i])
@@ -138,7 +137,7 @@ class mg:
                 fermi_out = cp.zeros_like(fermi_out)
                 self.restrict_f2c( i, rand_fermi.reshape(-1), fermi_out, self.coarse_dof[i], fine_sites_per_coarse)
                 print(rand_fermi)
-                print(fermi_out.reshape(self.fine_info[i+1].nx,self.fine_info[i+1].ny,self.fine_info[i+1].nc))
+                print(fermi_out.reshape(self.mg_ops[i+1].nx,self.mg_ops[i+1].ny,self.mg_ops[i+1].nc))
 
 
                 

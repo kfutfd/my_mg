@@ -8,15 +8,26 @@ import numpy as np
 # 定义矩阵乘法
 def apply_mat( Vin, op):
 
+#     Vout = cp.zeros(Vin.shape, dtype=Vin.dtype)
+#     kappa = 0.125
+#     kappa = 0.2
+
+#     # Vout = (1*cp.roll(Vin, -1, axis=0) + cp.roll(Vin, 1, axis=0) + cp.roll(Vin, -1, axis=1) + cp.roll(Vin, 1, axis=1) + cp.roll(Vin, -1, axis=2) + cp.roll(Vin, 1, axis=2) - 4*Vin ) 
+
+#     Vout = Vin - kappa*(cp.einsum('...ab,...b->...a', cp.roll(op.U[0,:], -1, axis=0), cp.roll(Vin, -1, axis=0)) + cp.einsum('...ba,...b->...a', cp.conj(op.U[0,:]), cp.roll(Vin, 1, axis=0)) + cp.einsum('...ab,...b->...a', cp.roll(op.U[1,:], -1, axis=1), cp.roll(Vin, -1, axis=1)) + cp.einsum('...ba,...b->...a', cp.conj(op.U[1,:]), cp.roll(Vin, 1, axis=1)))
+#     return Vout
+
+
+# def apply_mat_nopping_clover( Vin, op):
+
     Vout = cp.zeros(Vin.shape, dtype=Vin.dtype)
     kappa = 0.125
     kappa = 0.2
 
     # Vout = (1*cp.roll(Vin, -1, axis=0) + cp.roll(Vin, 1, axis=0) + cp.roll(Vin, -1, axis=1) + cp.roll(Vin, 1, axis=1) + cp.roll(Vin, -1, axis=2) + cp.roll(Vin, 1, axis=2) - 4*Vin ) 
 
-    Vout = Vin - kappa*(cp.einsum('...ab,...b->...a', cp.roll(op.U[0,:], -1, axis=0), cp.roll(Vin, -1, axis=0)) + cp.einsum('...ba,...b->...a', cp.conj(op.U[0,:]), cp.roll(Vin, 1, axis=0)) + cp.einsum('...ab,...b->...a', cp.roll(op.U[1,:], -1, axis=1), cp.roll(Vin, -1, axis=1)) + cp.einsum('...ba,...b->...a', cp.conj(op.U[1,:]), cp.roll(Vin, 1, axis=1)))
+    Vout = cp.einsum('...ab,...b->...a', op.clover, Vin) - kappa*(cp.einsum('...ab,...b->...a', op.hopping[0,:], cp.roll(Vin, -1, axis=0)) + cp.einsum('...ba,...b->...a', cp.conj(op.hopping[1,:]), cp.roll(Vin, 1, axis=0)) + cp.einsum('...ab,...b->...a', op.hopping[2,:], cp.roll(Vin, -1, axis=1)) + cp.einsum('...ba,...b->...a', cp.conj(op.hopping[3,:]), cp.roll(Vin, 1, axis=1)))
     return Vout
-
 
 
 # 格点参数
@@ -25,13 +36,32 @@ class operator_para:
     ny = 0
     nc = 0
     volume = 0
+    if_fine = 0
+    hopping = cp.zeros((4,nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
+    clover = cp.zeros((nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
 
-    def __init__(self, U, nx, ny, nc = 2):
+    def __init__(self, U, nx, ny, nc = 2, if_fine=0):
         self.nx = nx
         self.ny = ny
         self.nc = nc
         self.U = U
         self.volume = nx*ny
+        self.if_fine = if_fine
+
+        self.hopping = cp.zeros((4,nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
+        self.clover = cp.zeros((nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
+
+        for i in range(0,self.nc):
+            self.clover[:,:,i,i] = 1
+        
+        if self.if_fine != 0:
+            self.hopping[0,:] = cp.roll(self.U[0,:], -1, axis=0)   #x+
+            self.hopping[1,:] = self.U[0,:]                        #x-         
+            self.hopping[2,:] = cp.roll(self.U[1,:], -1, axis=1)   #y+
+            self.hopping[3,:] = self.U[0,:]                        #y-
+        
+
+
 
 
 

@@ -11,7 +11,7 @@ U = lattice.load_or_generate_U(nx, ny, nc, "./U_data/")
 print("生成的矩阵形状：", U.shape)
 
 #确定格点
-fine_op = lattice.operator_para(U, nx, ny, nc)
+fine_op = lattice.operator_para(U, nx, ny, nc, if_fine=1)
 
 
 V = cp.random.rand(nx,ny,nc*2, dtype=cp.float64).view(cp.complex128)
