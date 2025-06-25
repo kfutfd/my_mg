@@ -32,8 +32,10 @@ def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
     rho1 = 1
     w = 1
     alpha = 1
+    count = 0
     # 主迭代循环
     for k in range(max_iter):
+        count += 1
         # 计算 Ap = A * p
         Ap = lattice.apply_mat(p, op)
         
@@ -49,6 +51,7 @@ def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
         # 检查是否收敛
         print(cp.linalg.norm(r_1))
         if cp.linalg.norm(r_1) < tol:
+            print("count = ",count)
             return x
         
         # 计算 t = A * r
@@ -65,6 +68,7 @@ def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
         
         # 检查是否收敛
         if cp.linalg.norm(r) < tol:
+            print("count = ",count)
             return x
         
         # 计算 beta

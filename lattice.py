@@ -6,28 +6,39 @@ import numpy as np
 
 
 # 定义矩阵乘法
-def apply_mat( Vin, op):
-
-#     Vout = cp.zeros(Vin.shape, dtype=Vin.dtype)
-#     kappa = 0.125
-#     kappa = 0.2
-
-#     # Vout = (1*cp.roll(Vin, -1, axis=0) + cp.roll(Vin, 1, axis=0) + cp.roll(Vin, -1, axis=1) + cp.roll(Vin, 1, axis=1) + cp.roll(Vin, -1, axis=2) + cp.roll(Vin, 1, axis=2) - 4*Vin ) 
-
-#     Vout = Vin - kappa*(cp.einsum('...ab,...b->...a', cp.roll(op.U[0,:], -1, axis=0), cp.roll(Vin, -1, axis=0)) + cp.einsum('...ba,...b->...a', cp.conj(op.U[0,:]), cp.roll(Vin, 1, axis=0)) + cp.einsum('...ab,...b->...a', cp.roll(op.U[1,:], -1, axis=1), cp.roll(Vin, -1, axis=1)) + cp.einsum('...ba,...b->...a', cp.conj(op.U[1,:]), cp.roll(Vin, 1, axis=1)))
-#     return Vout
-
-
-# def apply_mat_nopping_clover( Vin, op):
-
+def apply_clover(Vin, op):
     Vout = cp.zeros(Vin.shape, dtype=Vin.dtype)
-    kappa = 0.125
-    kappa = 0.2
-
-    # Vout = (1*cp.roll(Vin, -1, axis=0) + cp.roll(Vin, 1, axis=0) + cp.roll(Vin, -1, axis=1) + cp.roll(Vin, 1, axis=1) + cp.roll(Vin, -1, axis=2) + cp.roll(Vin, 1, axis=2) - 4*Vin ) 
-
-    Vout = cp.einsum('...ab,...b->...a', op.clover, Vin) - kappa*(cp.einsum('...ab,...b->...a', op.hopping[0,:], cp.roll(Vin, -1, axis=0)) + cp.einsum('...ba,...b->...a', cp.conj(op.hopping[1,:]), cp.roll(Vin, 1, axis=0)) + cp.einsum('...ab,...b->...a', op.hopping[2,:], cp.roll(Vin, -1, axis=1)) + cp.einsum('...ba,...b->...a', cp.conj(op.hopping[3,:]), cp.roll(Vin, 1, axis=1)))
+    Vout = cp.einsum('...ab,...b->...a', op.clover, Vin)
     return Vout
+
+def apply_hopping_x_p(Vin, op):
+    Vout = cp.zeros(Vin.shape, dtype=Vin.dtype)
+    Vout = (cp.einsum('...ab,...b->...a', op.hopping[0,:], cp.roll(Vin, -1, axis=0)))
+    return Vout
+
+def apply_hopping_x_m(Vin, op):
+    Vout = cp.zeros(Vin.shape, dtype=Vin.dtype)
+    Vout = (cp.einsum('...ab,...b->...a', op.hopping[1,:], cp.roll(Vin, 1, axis=0)))
+    return Vout
+
+def apply_hopping_y_p(Vin, op):
+    Vout = cp.zeros(Vin.shape, dtype=Vin.dtype)
+    Vout = (cp.einsum('...ab,...b->...a', op.hopping[2,:], cp.roll(Vin, -1, axis=1)))
+    return Vout
+
+def apply_hopping_y_m(Vin, op):
+    Vout = cp.zeros(Vin.shape, dtype=Vin.dtype)
+    Vout = (cp.einsum('...ab,...b->...a', op.hopping[3,:], cp.roll(Vin, 1, axis=1)))
+    return Vout
+
+def apply_hopping(Vin, op):
+    Vout = cp.zeros(Vin.shape, dtype=Vin.dtype)
+    Vout = apply_hopping_x_p(Vin, op) + apply_hopping_x_m(Vin, op) + apply_hopping_y_p(Vin, op) + apply_hopping_y_m(Vin, op)
+    return Vout
+
+def apply_mat( Vin, op):
+    Vin = apply_clover(Vin, op) + apply_hopping(Vin, op)
+    return Vin
 
 
 # 格点参数
@@ -40,7 +51,7 @@ class operator_para:
     hopping = cp.zeros((4,nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
     clover = cp.zeros((nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
 
-    def __init__(self, U, nx, ny, nc = 2, if_fine=0):
+    def __init__(self, nx, ny, nc = 2, U=0, if_fine=0):
         self.nx = nx
         self.ny = ny
         self.nc = nc
@@ -55,10 +66,18 @@ class operator_para:
             self.clover[:,:,i,i] = 1
         
         if self.if_fine != 0:
-            self.hopping[0,:] = cp.roll(self.U[0,:], -1, axis=0)   #x+
-            self.hopping[1,:] = self.U[0,:]                        #x-         
-            self.hopping[2,:] = cp.roll(self.U[1,:], -1, axis=1)   #y+
-            self.hopping[3,:] = self.U[0,:]                        #y-
+            print(self.hopping.shape)
+            kappa = -0.125
+            self.hopping[0,:] = kappa*cp.roll(self.U[0,:], -1, axis=0)   #x+
+            self.hopping[1,:] = kappa*cp.conj(self.U[0,:]).transpose(0,1,3,2)               #x- 
+            self.hopping[2,:] = kappa*cp.roll(self.U[1,:], -1, axis=1)   #y+
+            self.hopping[3,:] = kappa*cp.conj(self.U[1,:]).transpose(0,1,3,2)               #y-
+
+        # for i in range(0,self.nc):
+        #     self.hopping[0,:,:,i,i] = 1
+        #     self.hopping[1,:,:,i,i] = 1
+        #     self.hopping[2,:,:,i,i] = 1
+        #     self.hopping[3,:,:,i,i] = 1
         
 
 
