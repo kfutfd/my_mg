@@ -1,4 +1,4 @@
-import cupy as cp
+import numpy as cp
 import numpy as np
 import lattice
 import bicgstab
@@ -9,11 +9,12 @@ from cupyx.scipy.sparse.linalg import LinearOperator
 
 class mg:
 
-    blocksize = [2, 2, 2, 2, 2, 2] #每一层的单个方向的压缩程度
-    coarse_dof = [4, 12, 12, 12, 12, 12] #新一层的内禀维度
+    blocksize = [4, 2, 2, 2, 2, 2] #每一层的单个方向的压缩程度
+    coarse_dof = [8, 12, 12, 24, 12, 12] #新一层的内禀维度
     R_null_vec = [] #
     mg_ops = []
     coarse_map = []
+    fine_sites_per_coarse_list = []
 
     #生成近零空间向量
     def near_null_vec(self, P_null_vec_coarse, coarse_dof, coarse_op):
@@ -27,10 +28,10 @@ class mg:
             #-Ar
             Ar = -Ar
             #x = (A^-1)*(-Ar)
-            x = bicgstab.bicgstab(Ar, op=coarse_op, tol=5e-5)
+            x = bicgstab.bicgstab(Ar, op=coarse_op, tol=5e-5, max_iter=1000)
             #V = x+r
             P_null_vec_coarse[i,:,:,:] += x
-            print(P_null_vec_coarse[i,:,0,0])
+            # print(P_null_vec_coarse[i,:,0,0])
 
 
             #施密特正交化
@@ -39,8 +40,8 @@ class mg:
 
             # P_null_vec_coarse[i,:] = cp.zeros_like(P_null_vec_coarse[i,:])
             P_null_vec_coarse[i,:] = P_null_vec_coarse[i,:]/cp.sqrt(cp.vdot(cp.conj(P_null_vec_coarse[i,:]), P_null_vec_coarse[i,:]))
-            if i==0:
-                print("after",P_null_vec_coarse[i,:])
+            # if i==0:
+                # print("after",P_null_vec_coarse[i,:])
             # print(lattice.apply_mat(P_null_vec_coarse[i,:,:,:], op = coarse_op)[:,0,0])
 
         return P_null_vec_coarse
@@ -58,11 +59,16 @@ class mg:
         ptr = (coarse_op.ny*coords[0] + coords[1])*coarse_op.nc + i
         return ptr
 
+    def zeros_like_fermi(self, level):
+        fermi_out = cp.random.rand(self.mg_ops[level].nx, self.mg_ops[level].ny, self.mg_ops[level].nc*2).view(cp.complex128)
+        fermi_out = cp.zeros_like(fermi_out)
+        return fermi_out
 
     '''
     建立粗网格与细网格之间的对应关系
     '''
     def build_mapping(self, map_id, fine_op, coarse_op):
+        print("Buliding map...")
         for i in range(0,coarse_op.volume):
             x_coarse, y_coarse = self.index_to_coord(i, coarse_op)
             coarse_coords = [x_coarse, y_coarse]
@@ -71,6 +77,7 @@ class mg:
             blocksizes = int(fine_op.nx/coarse_op.nx)
             count = [0]
             self.recursive_site_build(map_id, coarse_coords, coords, 0, count, blocksizes, fine_op, i)
+        print("Buliding map finished")
 
     '''
     build_mapping用到的递归函数
@@ -85,7 +92,9 @@ class mg:
                 self.coarse_map[map_id][fine_ptr][count[0]] = self.coord_to_index(coords, fine_op, i)
                 count[0] = count[0] + 1
 
-    def restrict_f2c(self, fine_leve, fermi_in, fermi_out, nevc, fine_sites_per_coarse):
+    def restrict_f2c(self, fine_leve, fermi_in, fermi_out):
+        fine_sites_per_coarse = self.fine_sites_per_coarse_list[fine_leve]
+        nevc = self.coarse_dof[fine_leve]
         fermi_in = fermi_in.reshape(-1)
         fermi_out = fermi_out.reshape(-1)
         for i in range(0,self.mg_ops[fine_leve+1].volume):
@@ -96,7 +105,9 @@ class mg:
 
 
 
-    def prolong_c2f(self, fine_leve, fermi_in, fermi_out, nevc, fine_sites_per_coarse):
+    def prolong_c2f(self, fine_leve, fermi_in, fermi_out):
+        fine_sites_per_coarse = self.fine_sites_per_coarse_list[fine_leve]
+        nevc = self.coarse_dof[fine_leve]
         fermi_in = fermi_in.reshape(-1)
         fermi_out = fermi_out.reshape(-1)
         for i in range(0,self.mg_ops[fine_leve+1].volume):
@@ -143,17 +154,19 @@ class mg:
         ny = self.fine_op.ny
         nc = self.fine_op.nc
         if(ifeigen == 0):
+            print("搭建多重网格...")
             self.mg_ops.append(fine_op)######################################
             for i in range(0,n_refine):
-
-                P_null_vec_coarse = cp.random.rand(self.coarse_dof[i], nx, ny, nc*2, dtype=cp.float64).view(cp.complex128)
+                print("当前层： ", i)
+                print("创造近零空间向量...")
+                P_null_vec_coarse = cp.random.rand(self.coarse_dof[i], nx, ny, nc*2).view(cp.complex128)
                 # print(P_null_vec_coarse[7,:,:,:])
-                P_null_vec_coarse = self.near_null_vec(P_null_vec_coarse, self.coarse_dof[i], fine_op)
+                P_null_vec_coarse = self.near_null_vec(P_null_vec_coarse, self.coarse_dof[i], self.mg_ops[i])
                 P_null_vec_coarse = P_null_vec_coarse.reshape(P_null_vec_coarse.shape[0],-1)
                 self.R_null_vec.append(P_null_vec_coarse)######################################
-
+                print("近零空间向量创造完毕")
                 
-                rand_fermi =  cp.random.rand(nx, ny, nc*2, dtype=cp.float64).view(cp.complex128)
+                rand_fermi =  cp.random.rand(nx, ny, nc*2).view(cp.complex128)
                 rand_fermi =  cp.zeros_like(rand_fermi)
                 rand_fermi =  cp.ones_like(rand_fermi)
                 # rand_fermi[0,0,0] = 1000
@@ -166,6 +179,7 @@ class mg:
 
                 map = [[int(0)]*int(self.blocksize[i]*self.blocksize[i]*nc_c)] * int(nx*ny)
                 fine_sites_per_coarse = int(self.blocksize[i]*self.blocksize[i]*nc_c)
+                self.fine_sites_per_coarse_list.append(fine_sites_per_coarse)
 
                 map = np.array(map)
                 self.coarse_map.append(map)######################################         
@@ -174,15 +188,16 @@ class mg:
 
                 coarse_op = lattice.operator_para(nx, ny, nc)
                 self.mg_ops.append(coarse_op)
-                self.build_mapping( i, fine_op, coarse_op)
-                print(self.coarse_map[i].shape)
-                print(self.coarse_map[i])
-                print(len(np.unique(self.coarse_map[i])) < len(self.coarse_map[i]))
+                self.build_mapping( i, self.mg_ops[i], self.mg_ops[i+1])
+                # print(self.coarse_map[i].shape)
+                # print(self.coarse_map[i])
+                # print(len(np.unique(self.coarse_map[i])) < len(self.coarse_map[i]))
 
                 self.local_orthogonalization(i, self.coarse_dof[i], fine_sites_per_coarse)
                 
                 
-                fermi_out = cp.random.rand(nx, ny, nc*2, dtype=cp.float64).view(cp.complex128).reshape((nx,ny,nc))
+                fermi_out = cp.random.rand(nx, ny, nc*2).view(cp.complex128)
+                fermi_out  = self.zeros_like_fermi(i+1)
                 fermi_out = cp.zeros_like(fermi_out)
                 # fermi_out[0,0,0] = 1
                 # fermi_out[0,1,0] = 1
@@ -191,18 +206,21 @@ class mg:
                 fermi_out = fermi_out
                 fermi_out_pr = cp.zeros_like(fermi_out)
                 fermi_out_r = cp.zeros_like(rand_fermi)
-                # self.restrict_f2c( i, rand_fermi, fermi_out, self.coarse_dof[i], fine_sites_per_coarse)
-                # self.prolong_c2f( i, fermi_out, fermi_out_r, self.coarse_dof[i], fine_sites_per_coarse)
-                # self.restrict_f2c( i, fermi_out_r, fermi_out_pr, self.coarse_dof[i], fine_sites_per_coarse)
+                # self.restrict_f2c( i, rand_fermi, fermi_out)
+                # self.prolong_c2f( i, fermi_out, fermi_out_r)
+                # self.restrict_f2c( i, fermi_out_r, fermi_out_pr)
                 # print(rand_fermi)
                 # print(fermi_out)
                 # print(fermi_out_r)
                 # print(fermi_out_pr)
 
+                print("生成更粗一层对角元与非对角元...")
                 ################################# transfer ######################################
                 self.mg_ops[i+1].clover = cp.zeros_like(self.mg_ops[i+1].clover)
                 # clover
+                print("clover:")
                 for color in range(0,self.mg_ops[i+1].nc):
+                    print(color)
                     
                     fermi_tmp_coarse = cp.zeros_like(fermi_out)
                     fermi_tmp_fine = cp.zeros_like(fermi_out_r)
@@ -212,10 +230,10 @@ class mg:
 
                     # print("fermi_tmp_coarse = ",fermi_tmp_coarse)
 
-                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                     fermi_tmp_Afine = lattice.apply_clover(fermi_tmp_fine, self.mg_ops[i])
                     fermi_tmp_coarse = cp.zeros_like(fermi_tmp_coarse)
-                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse)
 
                     self.mg_ops[i+1].clover[:,:,:,color] = fermi_tmp_coarse[:,:,:]
 
@@ -225,20 +243,22 @@ class mg:
                 # wilson
                 # self.mg_ops[i+1].clover = cp.zeros_like(self.mg_ops[i+1].clover)
                 self.mg_ops[i+1].hopping = cp.zeros_like(self.mg_ops[i+1].hopping)
+                print("wilson:")
                 for color in range(0,self.mg_ops[i+1].nc):
+                    print(color)
                     # xp=even
                     fermi_tmp_coarse = cp.zeros_like(fermi_out)
                     fermi_tmp_fine = cp.zeros_like(fermi_out_r)
                     fermi_tmp_Afine = cp.zeros_like(fermi_out_r)
 
                     fermi_tmp_coarse[0:-1:2,:,color] = 1
-                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                     fermi_tmp_Afine = lattice.apply_hopping_x_p(fermi_tmp_fine, self.mg_ops[i])
                     fermi_tmp_coarse = cp.zeros_like(fermi_tmp_coarse)
-                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse)
                     self.mg_ops[i+1].hopping[0,1::2,:,:,color] = fermi_tmp_coarse[1::2,:,:]
                     self.mg_ops[i+1].clover[0:-1:2,:,:,color] += fermi_tmp_coarse[0:-1:2,:,:]
-                    print("fermi_tmp_coarse = ", fermi_tmp_coarse)
+                    # print("fermi_tmp_coarse = ", fermi_tmp_coarse)
 
                     # xp=odd
                     fermi_tmp_coarse = cp.zeros_like(fermi_out)
@@ -246,11 +266,11 @@ class mg:
                     fermi_tmp_Afine = cp.zeros_like(fermi_out_r)
 
                     fermi_tmp_coarse[1::2,:,color] = 1
-                    print("fermi_tmp_coarse", fermi_tmp_coarse)
-                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                    # print("fermi_tmp_coarse", fermi_tmp_coarse)
+                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                     fermi_tmp_Afine = lattice.apply_hopping_x_p(fermi_tmp_fine, self.mg_ops[i])
                     fermi_tmp_coarse = cp.zeros_like(fermi_tmp_coarse)
-                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse)
                     self.mg_ops[i+1].hopping[0,0:-1:2,:,:,color] = fermi_tmp_coarse[0:-1:2,:,:]
                     self.mg_ops[i+1].clover[1::2,:,:,color] += fermi_tmp_coarse[1::2,:,:]
 
@@ -260,10 +280,10 @@ class mg:
                     fermi_tmp_Afine = cp.zeros_like(fermi_out_r)
 
                     fermi_tmp_coarse[0:-1:2,:,color] = 1
-                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                     fermi_tmp_Afine = lattice.apply_hopping_x_m(fermi_tmp_fine, self.mg_ops[i])
                     fermi_tmp_coarse = cp.zeros_like(fermi_tmp_coarse)
-                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse)
                     self.mg_ops[i+1].hopping[1,1::2,:,:,color] = fermi_tmp_coarse[1::2,:,:]
                     self.mg_ops[i+1].clover[0:-1:2,:,:,color] += fermi_tmp_coarse[0:-1:2,:,:]
 
@@ -273,10 +293,10 @@ class mg:
                     fermi_tmp_Afine = cp.zeros_like(fermi_out_r)
 
                     fermi_tmp_coarse[1::2,:,color] = 1
-                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                     fermi_tmp_Afine = lattice.apply_hopping_x_m(fermi_tmp_fine, self.mg_ops[i])
                     fermi_tmp_coarse = cp.zeros_like(fermi_tmp_coarse)
-                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse)
                     self.mg_ops[i+1].hopping[1,0:-1:2,:,:,color] = fermi_tmp_coarse[0:-1:2,:,:]
                     self.mg_ops[i+1].clover[1::2,:,:,color] += fermi_tmp_coarse[1::2,:,:]
 
@@ -286,10 +306,10 @@ class mg:
                     fermi_tmp_Afine = cp.zeros_like(fermi_out_r)
 
                     fermi_tmp_coarse[:,0:-1:2,color] = 1
-                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                     fermi_tmp_Afine = lattice.apply_hopping_y_p(fermi_tmp_fine, self.mg_ops[i])
                     fermi_tmp_coarse = cp.zeros_like(fermi_tmp_coarse)
-                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse)
                     self.mg_ops[i+1].hopping[2,:,1::2,:,color] = fermi_tmp_coarse[:,1::2,:]
                     self.mg_ops[i+1].clover[:,0:-1:2,:,color] += fermi_tmp_coarse[:,0:-1:2,:]
 
@@ -299,10 +319,10 @@ class mg:
                     fermi_tmp_Afine = cp.zeros_like(fermi_out_r)
 
                     fermi_tmp_coarse[:,1::2,color] = 1
-                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                     fermi_tmp_Afine = lattice.apply_hopping_y_p(fermi_tmp_fine, self.mg_ops[i])
                     fermi_tmp_coarse = cp.zeros_like(fermi_tmp_coarse)
-                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse)
                     self.mg_ops[i+1].hopping[2,:,0:-1:2,:,color] = fermi_tmp_coarse[:,0:-1:2,:]
                     self.mg_ops[i+1].clover[:,1::2,:,color] += fermi_tmp_coarse[:,1::2,:]
 
@@ -312,10 +332,10 @@ class mg:
                     fermi_tmp_Afine = cp.zeros_like(fermi_out_r)
 
                     fermi_tmp_coarse[:,0:-1:2,color] = 1
-                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                     fermi_tmp_Afine = lattice.apply_hopping_y_m(fermi_tmp_fine, self.mg_ops[i])
                     fermi_tmp_coarse = cp.zeros_like(fermi_tmp_coarse)
-                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse)
                     self.mg_ops[i+1].hopping[3,:,1::2,:,color] = fermi_tmp_coarse[:,1::2,:]
                     self.mg_ops[i+1].clover[:,0:-1:2,:,color] += fermi_tmp_coarse[:,0:-1:2,:]
 
@@ -325,10 +345,10 @@ class mg:
                     fermi_tmp_Afine = cp.zeros_like(fermi_out_r)
 
                     fermi_tmp_coarse[:,1::2,color] = 1
-                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                     fermi_tmp_Afine = lattice.apply_hopping_y_m(fermi_tmp_fine, self.mg_ops[i])
                     fermi_tmp_coarse = cp.zeros_like(fermi_tmp_coarse)
-                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse, self.coarse_dof[i], fine_sites_per_coarse)
+                    self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse)
                     self.mg_ops[i+1].hopping[3,:,0:-1:2,:,color] = fermi_tmp_coarse[:,0:-1:2,:]
                     self.mg_ops[i+1].clover[:,1::2,:,color] += fermi_tmp_coarse[:,1::2,:]
 
@@ -339,27 +359,138 @@ class mg:
                 fermi_tmp_coarse_t = cp.zeros_like(fermi_out)
                 fermi_tmp_coarse[:,:,0] = 1
 
-                print("self.mg_ops[i+1].hopping", self.mg_ops[i+1].hopping[0,:,:,:,:])
+                # print("self.mg_ops[i+1].hopping", self.mg_ops[i+1].hopping[0,:,:,:,:])
                 fermi_tmp_coarse_n = lattice.apply_mat(fermi_tmp_coarse,self.mg_ops[i+1])
-                self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine, self.coarse_dof[i], fine_sites_per_coarse)
+                self.prolong_c2f( i, fermi_tmp_coarse, fermi_tmp_fine)
                 fermi_tmp_Afine = lattice.apply_mat(fermi_tmp_fine, self.mg_ops[i])
-                self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse_t, self.coarse_dof[i], fine_sites_per_coarse)
+                self.restrict_f2c( i, fermi_tmp_Afine, fermi_tmp_coarse_t)
 
 
                 # print("clover = ", self.mg_ops[i+1].clover)
-                print("self.mg_ops[i+1].hopping", self.mg_ops[i+1].hopping[0,:,:,:,:])
+                # print("self.mg_ops[i+1].hopping", self.mg_ops[i+1].hopping[0,:,:,:,:])
 
-                print("fermi_tmp_coarse_n = ",fermi_tmp_coarse_n)
-                print("fermi_tmp_coarse_t = ",fermi_tmp_coarse_t)
+                # print("fermi_tmp_coarse_n = ",fermi_tmp_coarse_n)
+                # print("fermi_tmp_coarse_t = ",fermi_tmp_coarse_t)
                 print("dif = ",cp.linalg.norm(fermi_tmp_coarse_n-fermi_tmp_coarse_t))
 
-                
-
-
+            
 
         else:
             a=0
 
+
+    def mg_bicgstab_recursive(self, b, max_iter=300, tol=1e-10, if_info=1, info = bicgstab.cg_info(), level=0, relative_tol=0):
+        x = cp.zeros_like(b)
+
+        if level < self.n_refine+1:
+            # 计算初始残差 r = b - Ax
+            r = b - lattice.apply_mat(x, self.mg_ops[level])
+            if relative_tol != 0:
+                tol = cp.linalg.norm(r)*relative_tol
+            # print(r)
+            r0 = r.copy()  # 保存初始残差 r0
+            p = r.copy()   # 初始化搜索方向 p
+            rho = 1
+            rho1 = 1
+            w = 1
+            alpha = 1
+            count = 0
+            # 主迭代循环
+            for k in range(max_iter):
+                count += 1
+                # 计算 Ap = A * p
+                Ap = lattice.apply_mat(p, self.mg_ops[level])
+                
+                # 计算步长 alpha
+                alpha = cp.vdot(cp.conj(r0), r) / cp.vdot(cp.conj(r0), Ap)
+                # print("alpha = ", alpha)
+                        
+                x += alpha * p
+
+                # 更新中间残差 r_1 = r - alpha * Ap
+                r_1 = r - alpha * Ap
+
+                # 检查是否收敛
+                if if_info!=0:
+                    print("level = ", level, cp.linalg.norm(r_1))
+
+                if cp.linalg.norm(r_1) < tol:
+                    if if_info!=0:
+                        print("count = ",count)
+                    info.count = count
+                    info.norm_r = cp.linalg.norm(r_1)
+                    info.r = r_1
+                    return x
+                
+                # 计算 t = A * r
+                t = lattice.apply_mat(r, self.mg_ops[level])
+                
+                # 计算 omega
+                omega = cp.vdot(cp.conj(t), r) / cp.vdot(cp.conj(t), t)
+                
+                # 更新解 x
+                x += omega * r_1
+                
+                # 更新残差 r = r_1 - omega * t
+                r_1 = r_1 - omega * lattice.apply_mat(r_1, self.mg_ops[level])
+                
+                
+                if level < self.n_refine:
+                    #下潜
+                    r_coarse = self.zeros_like_fermi(level=level+1)
+                    # z1_prec_fine = bicgstab.bicgstab(r_1, op=self.mg_ops[level], if_info=0, relative_tol=1e-1)
+                    # z1_fine = lattice.apply_mat(z1_prec_fine, self.mg_ops[level])
+                    self.restrict_f2c(level, r_1, r_coarse)
+
+                    #递归
+                    e_coarse = self.mg_bicgstab_recursive(r_coarse, level=level+1, info=info, relative_tol=1e-1, if_info=0)
+                    # e_coarse = bicgstab.bicgstab(r_coarse, op=self.mg_ops[level-1], if_info=1, relative_tol=1e-1)
+                    if level == 0:
+                        a=0
+                    #上浮
+                    z2_fine = self.zeros_like_fermi(level=level)
+                    e0_fine = self.zeros_like_fermi(level=level)
+                    self.prolong_c2f(level, e_coarse, z2_fine)
+                    # e0_fine += z1_fine
+                    e0_fine += z2_fine
+                    # e0_fine = bicgstab.bicgstab(r_1, op=self.mg_ops[level], if_info=1, relative_tol=1e-10)
+                    x = x + e0_fine
+                    r_1 = b - lattice.apply_mat(x, self.mg_ops[level])
+
+                else:
+                    a=0
+                    # x_stack[-1] = x
+
+                # 检查是否收敛
+                if cp.linalg.norm(r_1) < tol:
+                    if if_info!=0:
+                        print("count = ",count)
+                    info.count = count
+                    info.norm_r = cp.linalg.norm(r_1)
+                    info.r = r_1
+                    return x
+                # 计算 beta
+                beta = (cp.vdot(cp.conj(r_1), r_1) / cp.vdot(cp.conj(r), r)) 
+                
+                # 更新搜索方向 p
+                p = r_1 + alpha*beta/omega*p - alpha*beta*Ap
+
+                r = r_1
+
+            # 如果未收敛，抛出错误
+            return x
+
+        if level == 0:
+            print("level = ",level,"   ")
+
+
+
+
+    def mg_bicgstab(self, b,op=0,  x0=None, max_iter=300, tol=1e-10, if_info=0, info = bicgstab.cg_info(), relative_tol=0.1):
+
+        X = self.mg_bicgstab_recursive( b, max_iter=300, tol=1e-10, info = info, level=0, relative_tol=1e-8)
+        print("mg_bicgstab.count = ", info.count)
+    
     
         
 

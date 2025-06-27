@@ -1,8 +1,8 @@
 import lattice
 import mg
-import cupy as cp
+import numpy as cp
 import bicgstab
-nx = 4
+nx = 64
 ny = nx
 nc = 2
 
@@ -14,11 +14,13 @@ print("生成的矩阵形状：", U.shape)
 fine_op = lattice.operator_para(nx, ny, nc, U=U, if_fine=1)
 
 
-V = cp.random.rand(nx,ny,nc*2, dtype=cp.float64).view(cp.complex128)
+V = cp.random.rand(nx,ny,nc*2).view(cp.complex128)
+x0=cp.random.rand(nx,ny,nc*2).view(cp.complex128)
 
-my_mg = mg.mg(fine_op, 1)
+my_mg = mg.mg(fine_op, 3)
 
 
 Vout = lattice.apply_mat(V,fine_op)
-# V0 = bicgstab.bicgstab(Vout, op=fine_op)
+V0 = bicgstab.bicgstab(Vout,x0=x0, op=fine_op, if_info=1, relative_tol=1e-10)
+V1 = my_mg.mg_bicgstab(Vout, if_info=1, relative_tol=1e-8)
 # print(V[0,:,0] - V0[0,:,0])

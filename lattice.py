@@ -1,8 +1,9 @@
-import cupy as cp
+import numpy as cp
 import mg
 from cupyx.scipy.linalg import expm
 import os
 import numpy as np
+import cupy
 
 
 # 定义矩阵乘法
@@ -48,8 +49,8 @@ class operator_para:
     nc = 0
     volume = 0
     if_fine = 0
-    hopping = cp.zeros((4,nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
-    clover = cp.zeros((nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
+    hopping = cp.zeros((4,nx,ny,nc,nc*2)).view(cp.complex128)
+    clover = cp.zeros((nx,ny,nc,nc*2)).view(cp.complex128)
 
     def __init__(self, nx, ny, nc = 2, U=0, if_fine=0):
         self.nx = nx
@@ -59,8 +60,8 @@ class operator_para:
         self.volume = nx*ny
         self.if_fine = if_fine
 
-        self.hopping = cp.zeros((4,nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
-        self.clover = cp.zeros((nx,ny,nc,nc*2), dtype=cp.float64).view(cp.complex128)
+        self.hopping = cp.zeros((4,nx,ny,nc,nc*2)).view(cp.complex128)
+        self.clover = cp.zeros((nx,ny,nc,nc*2)).view(cp.complex128)
 
         for i in range(0,self.nc):
             self.clover[:,:,i,i] = 1
@@ -92,6 +93,7 @@ class operator_para:
 sigma1 = cp.array([[0, 1], [1, 0]], dtype=complex)
 sigma2 = cp.array([[0, -1j], [1j, 0]], dtype=complex)
 sigma3 = cp.array([[1, 0], [0, -1]], dtype=complex)
+eye = cp.array([[1, 0], [0, 1]], dtype=complex)
 pauli = [sigma1, sigma2, sigma3]
 
 def generate_su2_matrix():
@@ -103,10 +105,20 @@ def generate_su2_matrix():
     # 构造李代数元素 X
     X = sum(a[k] * pauli[k] for k in range(3))
     # 计算 U = exp(i X)
+    X = cupy.asarray(X)
     U = expm(1j * X)
+    
     return U
 
+def generate_E_m_su2_u1():
+    a = cp.random.randn(1) #U(1)
+    E_m_su2 = eye-sigma1
+    return a*E_m_su2
 
+def generate_E_p_su2_u1():
+    a = cp.random.randn(1) #U(1)
+    E_m_su2 = eye+sigma1
+    return a*E_m_su2
 
 #SU(3)
 # 定义 Gell-Mann 矩阵
@@ -126,7 +138,9 @@ def generate_su3_matrix():
     # 构造 X = sum a_i * lambda_i
     X = sum(a[i] * gell_mann[i] for i in range(8))
     # 计算 U = exp(i X)
+    X = cupy.asarray(X)
     U = expm(1j * X)
+    
     return U
 
 
@@ -146,15 +160,22 @@ def generate_large_matrix(x, y, nc):
     large_matrix = cp.zeros((4,x, y, nc, nc), dtype=cp.complex128)
     
     # 为每个 (i, j) 位置生成 SU(2) 矩阵
-    for k in range(0,4):
-        for i in range(x):
-            for j in range(y):
-                if(nc == 2):
-                    large_matrix[k, i, j] = generate_su2_matrix()
-                elif(nc==3):
-                    large_matrix[k, i, j] = generate_su3_matrix()
-                else:
-                    print("generate_U error! nc size is not supported")
+    # for k in range(0,4):
+    #     for i in range(x):
+    #         for j in range(y):
+    #             if(nc == 2):
+    #                 large_matrix[k, i, j] = generate_su2_matrix().get()
+    #             elif(nc==3):
+    #                 large_matrix[k, i, j] = generate_su3_matrix().get()
+    #             else:
+    #                 print("generate_U error! nc size is not supported")
+    if(nc == 2):
+        # large_matrix[:, :, :] = generate_su2_matrix().get()
+        large_matrix[0::2,:,:] = generate_E_m_su2_u1()
+        large_matrix[:-1:2,:,:] = generate_E_p_su2_u1()
+    elif(nc==3):
+        large_matrix[:, :, :] = generate_su3_matrix().get()
+
     
     return large_matrix
 
@@ -187,7 +208,7 @@ def load_or_generate_U(nx, ny, nc, folder_path="."):
         # 确保U是complex128类型
         U = U.astype(cp.complex128)
         # 将CuPy数组转换为NumPy数组以保存
-        U_np = cp.asnumpy(U)
+        U_np = U
         # 保存到文件
         np.save(file_path, U_np)
         print(f"已保存文件 {file_name}")

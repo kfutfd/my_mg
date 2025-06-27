@@ -1,8 +1,14 @@
-import cupy as cp
+import numpy as cp
 import mg
 import lattice
 
-def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
+class cg_info:
+    count = 0
+    norm_r = 0
+    r=0
+
+
+def bicgstab(b, x0=None, op=None, max_iter=300, tol=1e-10, if_info=0, info = cg_info(), relative_tol=0):
     """
     使用BiCGSTAB方法求解 Ax = b，其中矩阵A的乘法操作被替换为 lattice.apply_mat(V, op)。
 
@@ -25,6 +31,8 @@ def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
 
     # 计算初始残差 r = b - Ax
     r = b - lattice.apply_mat(x, op)
+    if relative_tol != 0:
+        tol = cp.linalg.norm(r)*relative_tol
     # print(r)
     r0 = r.copy()  # 保存初始残差 r0
     p = r.copy()   # 初始化搜索方向 p
@@ -49,9 +57,15 @@ def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
         r_1 = r - alpha * Ap
 
         # 检查是否收敛
-        print(cp.linalg.norm(r_1))
+        if if_info!=0:
+            print(cp.linalg.norm(r_1))
+
         if cp.linalg.norm(r_1) < tol:
-            print("count = ",count)
+            if if_info!=0:
+                print("count = ",count)
+            info.count = count
+            info.norm_r = cp.linalg.norm(r_1)
+            info.r = r_1
             return x
         
         # 计算 t = A * r
@@ -68,7 +82,11 @@ def bicgstab(b, x0=None, op=None, max_iter=30000, tol=1e-18):
         
         # 检查是否收敛
         if cp.linalg.norm(r) < tol:
-            print("count = ",count)
+            if if_info!=0:
+                print("count = ",count)
+            info.count = count
+            info.norm_r = cp.linalg.norm(r_1)
+            info.r = r_1
             return x
         
         # 计算 beta
