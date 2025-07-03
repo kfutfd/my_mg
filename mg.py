@@ -28,7 +28,7 @@ class mg:
             #-Ar
             Ar = -Ar
             #x = (A^-1)*(-Ar)
-            x = bicgstab.bicgstab(Ar, op=coarse_op, tol=5e-5, max_iter=1000)
+            x = bicgstab.bicgstab(Ar, op=coarse_op, tol=5e-5)
             #V = x+r
             P_null_vec_coarse[i,:,:,:] += x
             # print(P_null_vec_coarse[i,:,0,0])
@@ -443,19 +443,19 @@ class mg:
                     self.restrict_f2c(level, r_1, r_coarse)
 
                     #递归
-                    e_coarse = self.mg_bicgstab_recursive(r_coarse, level=level+1, info=info, relative_tol=1e-1, if_info=0)
-                    # e_coarse = bicgstab.bicgstab(r_coarse, op=self.mg_ops[level-1], if_info=1, relative_tol=1e-1)
-                    if level == 0:
-                        a=0
+                    e_coarse = self.mg_bicgstab_recursive(r_coarse, level=level+1, info=info, relative_tol=0.25, if_info=0, max_iter=15)
+                    
+
                     #上浮
                     z2_fine = self.zeros_like_fermi(level=level)
                     e0_fine = self.zeros_like_fermi(level=level)
                     self.prolong_c2f(level, e_coarse, z2_fine)
                     # e0_fine += z1_fine
                     e0_fine += z2_fine
-                    # e0_fine = bicgstab.bicgstab(r_1, op=self.mg_ops[level], if_info=1, relative_tol=1e-10)
-                    x = x + e0_fine
-                    r_1 = b - lattice.apply_mat(x, self.mg_ops[level])
+
+                    if info.if_max_iter == 1:
+                        x = x + e0_fine
+                        r_1 = b - lattice.apply_mat(x, self.mg_ops[level])
 
                 else:
                     a=0
@@ -478,6 +478,8 @@ class mg:
                 r = r_1
 
             # 如果未收敛，抛出错误
+            print("over max_iter")
+            info.if_max_iter=1
             return x
 
         if level == 0:

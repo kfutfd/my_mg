@@ -68,7 +68,7 @@ class operator_para:
         
         if self.if_fine != 0:
             print(self.hopping.shape)
-            kappa = -0.125
+            kappa = -0.137
             self.hopping[0,:] = kappa*cp.roll(self.U[0,:], -1, axis=0)   #x+
             self.hopping[1,:] = kappa*cp.conj(self.U[0,:]).transpose(0,1,3,2)               #x- 
             self.hopping[2,:] = kappa*cp.roll(self.U[1,:], -1, axis=1)   #y+
@@ -118,6 +118,16 @@ def generate_E_m_su2_u1():
 def generate_E_p_su2_u1():
     a = cp.random.randn(1) #U(1)
     E_m_su2 = eye+sigma1
+    return a*E_m_su2
+
+def generate_E_m_su2_u1_2():
+    a = cp.random.randn(1) #U(1)
+    E_m_su2 = eye-sigma2
+    return a*E_m_su2
+
+def generate_E_p_su2_u1_2():
+    a = cp.random.randn(1) #U(1)
+    E_m_su2 = eye+sigma2
     return a*E_m_su2
 
 #SU(3)
@@ -171,8 +181,10 @@ def generate_large_matrix(x, y, nc):
     #                 print("generate_U error! nc size is not supported")
     if(nc == 2):
         # large_matrix[:, :, :] = generate_su2_matrix().get()
-        large_matrix[0::2,:,:] = generate_E_m_su2_u1()
-        large_matrix[:-1:2,:,:] = generate_E_p_su2_u1()
+        large_matrix[0,:,:] = generate_E_m_su2_u1()
+        large_matrix[1,:,:] = generate_E_p_su2_u1()
+        large_matrix[2,:,:] = generate_E_m_su2_u1_2()
+        large_matrix[3,:,:] = generate_E_p_su2_u1_2()
     elif(nc==3):
         large_matrix[:, :, :] = generate_su3_matrix().get()
 

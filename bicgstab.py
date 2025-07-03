@@ -5,10 +5,11 @@ import lattice
 class cg_info:
     count = 0
     norm_r = 0
-    r=0
+    r = 0
+    if_max_iter = 0
 
 
-def bicgstab(b, x0=None, op=None, max_iter=300, tol=1e-10, if_info=0, info = cg_info(), relative_tol=0):
+def bicgstab(b, x0=None, op=None, max_iter=3000, tol=1e-10, if_info=0, info = cg_info(), relative_tol=0):
     """
     使用BiCGSTAB方法求解 Ax = b，其中矩阵A的乘法操作被替换为 lattice.apply_mat(V, op)。
 
@@ -98,4 +99,7 @@ def bicgstab(b, x0=None, op=None, max_iter=300, tol=1e-10, if_info=0, info = cg_
         r = r_1
 
     # 如果未收敛，抛出错误
-    raise ValueError("BiCGSTAB 未能在最大迭代次数内收敛。")
+    # raise ValueError("BiCGSTAB 未能在最大迭代次数内收敛。")
+    print("over max_iter")
+    info.if_max_iter=1
+    return x

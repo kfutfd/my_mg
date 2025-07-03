@@ -21,6 +21,6 @@ my_mg = mg.mg(fine_op, 3)
 
 
 Vout = lattice.apply_mat(V,fine_op)
-V0 = bicgstab.bicgstab(Vout,x0=x0, op=fine_op, if_info=1, relative_tol=1e-10)
+V0 = bicgstab.bicgstab(Vout,x0, op=fine_op, if_info=1, relative_tol=1e-8)
 V1 = my_mg.mg_bicgstab(Vout, if_info=1, relative_tol=1e-8)
 # print(V[0,:,0] - V0[0,:,0])
