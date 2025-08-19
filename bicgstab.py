@@ -9,7 +9,7 @@ class cg_info:
     if_max_iter = 0
 
 
-def bicgstab(b, x0=None, op=None, max_iter=3000, tol=1e-10, if_info=0, info = cg_info(), relative_tol=0):
+def bicgstab(b, x0=None, op=None, max_iter=3000, tol=1e-8, if_info=0, info = cg_info(), relative_tol=0):
     """
     使用BiCGSTAB方法求解 Ax = b，其中矩阵A的乘法操作被替换为 lattice.apply_mat(V, op)。
 
@@ -33,7 +33,7 @@ def bicgstab(b, x0=None, op=None, max_iter=3000, tol=1e-10, if_info=0, info = cg
     # 计算初始残差 r = b - Ax
     r = b - lattice.apply_mat(x, op)
     if relative_tol != 0:
-        tol = cp.linalg.norm(r)*relative_tol
+        tol = cp.vdot(r, r)*relative_tol
     # print(r)
     r0 = r.copy()  # 保存初始残差 r0
     p = r.copy()   # 初始化搜索方向 p
@@ -49,7 +49,7 @@ def bicgstab(b, x0=None, op=None, max_iter=3000, tol=1e-10, if_info=0, info = cg
         Ap = lattice.apply_mat(p, op)
         
         # 计算步长 alpha
-        alpha = cp.vdot(cp.conj(r0), r) / cp.vdot(cp.conj(r0), Ap)
+        alpha = cp.vdot(r0, r) / cp.vdot(r0, Ap)
         # print("alpha = ", alpha)
                 
         x += alpha * p
@@ -59,13 +59,13 @@ def bicgstab(b, x0=None, op=None, max_iter=3000, tol=1e-10, if_info=0, info = cg
 
         # 检查是否收敛
         if if_info!=0:
-            print(cp.linalg.norm(r_1))
+            print(cp.vdot(r_1, r_1))
 
-        if cp.linalg.norm(r_1) < tol:
+        if cp.vdot(r_1, r_1) < tol:
             if if_info!=0:
                 print("count = ",count)
             info.count = count
-            info.norm_r = cp.linalg.norm(r_1)
+            info.norm_r = cp.vdot(r_1, r_1)
             info.r = r_1
             return x
         
@@ -73,7 +73,7 @@ def bicgstab(b, x0=None, op=None, max_iter=3000, tol=1e-10, if_info=0, info = cg
         t = lattice.apply_mat(r, op)
         
         # 计算 omega
-        omega = cp.vdot(cp.conj(t), r) / cp.vdot(cp.conj(t), t)
+        omega = cp.vdot(t, r) / cp.vdot(t, t)
         
         # 更新解 x
         x += omega * r_1
@@ -82,16 +82,16 @@ def bicgstab(b, x0=None, op=None, max_iter=3000, tol=1e-10, if_info=0, info = cg
         r_1 = r_1 - omega * lattice.apply_mat(r_1, op)
         
         # 检查是否收敛
-        if cp.linalg.norm(r) < tol:
+        if cp.vdot(r, r) < tol:
             if if_info!=0:
                 print("count = ",count)
             info.count = count
-            info.norm_r = cp.linalg.norm(r_1)
+            info.norm_r = cp.vdot(r_1, r_1)
             info.r = r_1
             return x
         
         # 计算 beta
-        beta = (cp.vdot(cp.conj(r_1), r_1) / cp.vdot(cp.conj(r), r)) 
+        beta = (cp.vdot(r_1, r_1) / cp.vdot(r, r)) 
         
         # 更新搜索方向 p
         p = r_1 + alpha*beta/omega*p - alpha*beta*Ap

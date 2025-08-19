@@ -2,33 +2,33 @@ import numpy as cp
 import numpy as np
 import lattice
 import bicgstab
-from cupyx.scipy.sparse.linalg import eigsh
-from cupyx.scipy.sparse.linalg import LinearOperator
+# from cupyx.scipy.sparse.linalg import eigsh
+# from cupyx.scipy.sparse.linalg import LinearOperator
 
       
 
 class mg:
 
     blocksize = [4, 2, 2, 2, 2, 2] #每一层的单个方向的压缩程度
-    coarse_dof = [8, 12, 12, 24, 12, 12] #新一层的内禀维度
+    coarse_dof = [8, 12, 12, 12, 12, 12] #新一层的内禀维度
     R_null_vec = [] #
     mg_ops = []
     coarse_map = []
     fine_sites_per_coarse_list = []
 
     #生成近零空间向量
-    def near_null_vec(self, P_null_vec_coarse, coarse_dof, coarse_op):
+    def near_null_vec(self, P_null_vec_coarse, coarse_dof, coarse_op, info = bicgstab.cg_info()):
         for i in range(0, coarse_dof):
             #施密特正交化
             for k in range(0,i):
-                P_null_vec_coarse[i,:,:,:] -= cp.vdot(cp.conj(P_null_vec_coarse[i,:,:,:]),P_null_vec_coarse[k,:,:,:])/cp.vdot(cp.conj(P_null_vec_coarse[k,:,:,:]),P_null_vec_coarse[k,:,:,:])*P_null_vec_coarse[k,:,:,:]
+                P_null_vec_coarse[i,:,:,:] -= cp.vdot((P_null_vec_coarse[k,:,:,:]),P_null_vec_coarse[i,:,:,:])/cp.vdot((P_null_vec_coarse[k,:,:,:]),P_null_vec_coarse[k,:,:,:])*P_null_vec_coarse[k,:,:,:]
 
             #Ar
             Ar = lattice.apply_mat(P_null_vec_coarse[i,:,:,:], coarse_op)
             #-Ar
             Ar = -Ar
             #x = (A^-1)*(-Ar)
-            x = bicgstab.bicgstab(Ar, op=coarse_op, tol=5e-5)
+            x = bicgstab.bicgstab(Ar, op=coarse_op, tol=5e-5, info=info)
             #V = x+r
             P_null_vec_coarse[i,:,:,:] += x
             # print(P_null_vec_coarse[i,:,0,0])
@@ -36,10 +36,10 @@ class mg:
 
             #施密特正交化
             for k in range(0,i):
-                P_null_vec_coarse[i,:,:,:] -= cp.vdot(cp.conj(P_null_vec_coarse[i,:,:,:]),P_null_vec_coarse[k,:,:,:])/cp.vdot(cp.conj(P_null_vec_coarse[k,:,:,:]),P_null_vec_coarse[k,:,:,:])*P_null_vec_coarse[k,:,:,:]
+                P_null_vec_coarse[i,:,:,:] -= cp.vdot((P_null_vec_coarse[k,:,:,:]),P_null_vec_coarse[i,:,:,:])/cp.vdot((P_null_vec_coarse[k,:,:,:]),P_null_vec_coarse[k,:,:,:])*P_null_vec_coarse[k,:,:,:]
 
             # P_null_vec_coarse[i,:] = cp.zeros_like(P_null_vec_coarse[i,:])
-            P_null_vec_coarse[i,:] = P_null_vec_coarse[i,:]/cp.sqrt(cp.vdot(cp.conj(P_null_vec_coarse[i,:]), P_null_vec_coarse[i,:]))
+            P_null_vec_coarse[i,:] = P_null_vec_coarse[i,:]/cp.sqrt(cp.vdot((P_null_vec_coarse[i,:]), P_null_vec_coarse[i,:]))
             # if i==0:
                 # print("after",P_null_vec_coarse[i,:])
             # print(lattice.apply_mat(P_null_vec_coarse[i,:,:,:], op = coarse_op)[:,0,0])
@@ -92,51 +92,51 @@ class mg:
                 self.coarse_map[map_id][fine_ptr][count[0]] = self.coord_to_index(coords, fine_op, i)
                 count[0] = count[0] + 1
 
-    def restrict_f2c(self, fine_leve, fermi_in, fermi_out):
-        fine_sites_per_coarse = self.fine_sites_per_coarse_list[fine_leve]
-        nevc = self.coarse_dof[fine_leve]
+    def restrict_f2c(self, fine_level, fermi_in, fermi_out):
+        fine_sites_per_coarse = self.fine_sites_per_coarse_list[fine_level]
+        nevc = self.coarse_dof[fine_level]
         fermi_in = fermi_in.reshape(-1)
         fermi_out = fermi_out.reshape(-1)
-        for i in range(0,self.mg_ops[fine_leve+1].volume):
+        for i in range(0,self.mg_ops[fine_level+1].volume):
             for i_dof in range(0,nevc):
-                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_leve+1])
+                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_level+1])
                 for j in range(0, fine_sites_per_coarse):
-                    fermi_out[cv_index] += np.conj(self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]])*fermi_in[self.coarse_map[fine_leve][i][j]]
+                    fermi_out[cv_index] += np.conj(self.R_null_vec[fine_level][i_dof][self.coarse_map[fine_level][i][j]])*fermi_in[self.coarse_map[fine_level][i][j]]
 
 
 
-    def prolong_c2f(self, fine_leve, fermi_in, fermi_out):
-        fine_sites_per_coarse = self.fine_sites_per_coarse_list[fine_leve]
-        nevc = self.coarse_dof[fine_leve]
+    def prolong_c2f(self, fine_level, fermi_in, fermi_out):
+        fine_sites_per_coarse = self.fine_sites_per_coarse_list[fine_level]
+        nevc = self.coarse_dof[fine_level]
         fermi_in = fermi_in.reshape(-1)
         fermi_out = fermi_out.reshape(-1)
-        for i in range(0,self.mg_ops[fine_leve+1].volume):
+        for i in range(0,self.mg_ops[fine_level+1].volume):
             for i_dof in range(0,nevc):
-                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_leve+1])
+                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_level+1])
                 for j in range(0, fine_sites_per_coarse):
-                    fermi_out[self.coarse_map[fine_leve][i][j]] += self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]]*fermi_in[cv_index]
+                    fermi_out[self.coarse_map[fine_level][i][j]] += self.R_null_vec[fine_level][i_dof][self.coarse_map[fine_level][i][j]]*fermi_in[cv_index]
 
 
-    def local_orthogonalization(self, fine_leve, nevc, fine_sites_per_coarse):
-        for i in range(0,self.mg_ops[fine_leve+1].volume):
+    def local_orthogonalization(self, fine_level, nevc, fine_sites_per_coarse):
+        for i in range(0,self.mg_ops[fine_level+1].volume):
             for i_dof in range(0,nevc):
-                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_leve+1])
+                cv_index = self.vol_index_dof_to_cv_index(i, i_dof, self.mg_ops[fine_level+1])
                 for k in range(0,i_dof):
 
                     k_dot = 0
                     k_i_dof_dot = 0
                     for j in range(0, fine_sites_per_coarse):
-                        k_dot += np.conj(self.R_null_vec[fine_leve][k][self.coarse_map[fine_leve][i][j]])*self.R_null_vec[fine_leve][k][self.coarse_map[fine_leve][i][j]]
-                        k_i_dof_dot += np.conj(self.R_null_vec[fine_leve][k][self.coarse_map[fine_leve][i][j]])*self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]]
+                        k_dot += np.conj(self.R_null_vec[fine_level][k][self.coarse_map[fine_level][i][j]])*self.R_null_vec[fine_level][k][self.coarse_map[fine_level][i][j]]
+                        k_i_dof_dot += np.conj(self.R_null_vec[fine_level][k][self.coarse_map[fine_level][i][j]])*self.R_null_vec[fine_level][i_dof][self.coarse_map[fine_level][i][j]]
                     for j in range(0, fine_sites_per_coarse):
-                        self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]] -= self.R_null_vec[fine_leve][k][self.coarse_map[fine_leve][i][j]] * k_i_dof_dot / k_dot 
+                        self.R_null_vec[fine_level][i_dof][self.coarse_map[fine_level][i][j]] -= self.R_null_vec[fine_level][k][self.coarse_map[fine_level][i][j]] * k_i_dof_dot / k_dot 
                     
                 i_dof_dot = 0
                 for j in range(0, fine_sites_per_coarse):
-                    i_dof_dot += np.conj(self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]])*self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]]
+                    i_dof_dot += np.conj(self.R_null_vec[fine_level][i_dof][self.coarse_map[fine_level][i][j]])*self.R_null_vec[fine_level][i_dof][self.coarse_map[fine_level][i][j]]
 
                 for j in range(0, fine_sites_per_coarse):
-                    self.R_null_vec[fine_leve][i_dof][self.coarse_map[fine_leve][i][j]] /= cp.sqrt(i_dof_dot)
+                    self.R_null_vec[fine_level][i_dof][self.coarse_map[fine_level][i][j]] /= cp.sqrt(i_dof_dot)
                 a=0
 
 
@@ -159,9 +159,12 @@ class mg:
             for i in range(0,n_refine):
                 print("当前层： ", i)
                 print("创造近零空间向量...")
-                P_null_vec_coarse = cp.random.rand(self.coarse_dof[i], nx, ny, nc*2).view(cp.complex128)
-                # print(P_null_vec_coarse[7,:,:,:])
-                P_null_vec_coarse = self.near_null_vec(P_null_vec_coarse, self.coarse_dof[i], self.mg_ops[i])
+                for s in range(10):
+                    info_null_vec = bicgstab.cg_info()
+                    P_null_vec_coarse = cp.random.rand(self.coarse_dof[i], nx, ny, nc*2).view(cp.complex128)
+                    P_null_vec_coarse = self.near_null_vec(P_null_vec_coarse, self.coarse_dof[i], self.mg_ops[i], info=info_null_vec)
+                    if (info_null_vec.if_max_iter==0):
+                        break
                 P_null_vec_coarse = P_null_vec_coarse.reshape(P_null_vec_coarse.shape[0],-1)
                 self.R_null_vec.append(P_null_vec_coarse)######################################
                 print("近零空间向量创造完毕")
@@ -386,7 +389,7 @@ class mg:
             # 计算初始残差 r = b - Ax
             r = b - lattice.apply_mat(x, self.mg_ops[level])
             if relative_tol != 0:
-                tol = cp.linalg.norm(r)*relative_tol
+                tol = cp.sqrt(cp.vdot(r, r))*relative_tol
             # print(r)
             r0 = r.copy()  # 保存初始残差 r0
             p = r.copy()   # 初始化搜索方向 p
@@ -395,6 +398,9 @@ class mg:
             w = 1
             alpha = 1
             count = 0
+            if if_info!=0:
+                a = " "*(level)
+                print(a, "level = ", level, cp.sqrt(cp.vdot(r, r)))
             # 主迭代循环
             for k in range(max_iter):
                 count += 1
@@ -402,7 +408,7 @@ class mg:
                 Ap = lattice.apply_mat(p, self.mg_ops[level])
                 
                 # 计算步长 alpha
-                alpha = cp.vdot(cp.conj(r0), r) / cp.vdot(cp.conj(r0), Ap)
+                alpha = cp.vdot((r0), r) / cp.vdot((r0), Ap)
                 # print("alpha = ", alpha)
                         
                 x += alpha * p
@@ -412,13 +418,16 @@ class mg:
 
                 # 检查是否收敛
                 if if_info!=0:
-                    print("level = ", level, cp.linalg.norm(r_1))
+                    a = " "*(level)
+                    print(a, "level = ", level, cp.sqrt(cp.vdot(r_1, r_1)))
 
-                if cp.linalg.norm(r_1) < tol:
+                if cp.sqrt(cp.vdot(r_1, r_1)) < tol:
                     if if_info!=0:
-                        print("count = ",count)
+                        a = " "*(level)
+                        print(a, "level = ", level, "RelRes", cp.sqrt(cp.vdot(r_1, r_1))/cp.sqrt(cp.vdot(r0, r0)))
+                        # print("count = ",count)
                     info.count = count
-                    info.norm_r = cp.linalg.norm(r_1)
+                    info.norm_r = cp.sqrt(cp.vdot(r_1, r_1))
                     info.r = r_1
                     return x
                 
@@ -426,7 +435,7 @@ class mg:
                 t = lattice.apply_mat(r, self.mg_ops[level])
                 
                 # 计算 omega
-                omega = cp.vdot(cp.conj(t), r) / cp.vdot(cp.conj(t), t)
+                omega = cp.vdot((t), r) / cp.vdot((t), t)
                 
                 # 更新解 x
                 x += omega * r_1
@@ -434,7 +443,8 @@ class mg:
                 # 更新残差 r = r_1 - omega * t
                 r_1 = r_1 - omega * lattice.apply_mat(r_1, self.mg_ops[level])
                 
-                
+                if level == 0:
+                    a=0
                 if level < self.n_refine:
                     #下潜
                     r_coarse = self.zeros_like_fermi(level=level+1)
@@ -443,7 +453,14 @@ class mg:
                     self.restrict_f2c(level, r_1, r_coarse)
 
                     #递归
-                    e_coarse = self.mg_bicgstab_recursive(r_coarse, level=level+1, info=info, relative_tol=0.25, if_info=0, max_iter=15)
+                    info_c = bicgstab.cg_info()
+                    relative_tol=0.25
+                    if level+1 == self.n_refine:
+                        e_coarse = self.mg_bicgstab_recursive(r_coarse, level=level+1, info=info_c, relative_tol=0.1, if_info=0, max_iter=100)
+                    else:
+                        e_coarse = self.mg_bicgstab_recursive(r_coarse, level=level+1, info=info_c, relative_tol=0.25, if_info=1, max_iter=100)
+                    a = " "*(level+1)
+                    print(a, "level", level+1, " ", "iter", info_c.count)
                     
 
                     #上浮
@@ -453,7 +470,11 @@ class mg:
                     # e0_fine += z1_fine
                     e0_fine += z2_fine
 
-                    if info.if_max_iter == 1:
+                    # Ap = lattice.apply_mat(e0_fine, self.mg_ops[level])
+                    # alpha = cp.vdot(Ap, r_1) / cp.vdot(Ap, Ap)
+
+
+                    if info_c.if_max_iter == 0:
                         x = x + e0_fine
                         r_1 = b - lattice.apply_mat(x, self.mg_ops[level])
 
@@ -462,15 +483,17 @@ class mg:
                     # x_stack[-1] = x
 
                 # 检查是否收敛
-                if cp.linalg.norm(r_1) < tol:
+                if cp.sqrt(cp.vdot(r_1, r_1)) < tol:
                     if if_info!=0:
-                        print("count = ",count)
+                        a = " "*(level)
+                        print(a, "level = ", level, "RelRes", cp.sqrt(cp.vdot(r_1, r_1))/cp.sqrt(cp.vdot(r0, r0)))
+                    #     print("count = ",count)
                     info.count = count
-                    info.norm_r = cp.linalg.norm(r_1)
+                    info.norm_r = cp.sqrt(cp.vdot(r_1, r_1))
                     info.r = r_1
                     return x
                 # 计算 beta
-                beta = (cp.vdot(cp.conj(r_1), r_1) / cp.vdot(cp.conj(r), r)) 
+                beta = (cp.vdot((r_1), r_1) / cp.vdot((r), r)) 
                 
                 # 更新搜索方向 p
                 p = r_1 + alpha*beta/omega*p - alpha*beta*Ap
@@ -478,7 +501,205 @@ class mg:
                 r = r_1
 
             # 如果未收敛，抛出错误
-            print("over max_iter")
+            a = " "*(level)
+            print(a, "level", level, "over max_iter")
+            info.if_max_iter=1
+            return x
+
+        if level == 0:
+            print("level = ",level,"   ")
+
+    def mg_minres(self, b, max_iter=300, tol=1e-10, if_info=1, info = bicgstab.cg_info(), level=0, relative_tol=0):
+        x = cp.zeros_like(b)
+
+        if level < self.n_refine+1:
+            # 计算初始残差 r = b - Ax
+            r = b - lattice.apply_mat(x, self.mg_ops[level])
+            if relative_tol != 0:
+                tol = cp.sqrt(cp.vdot(r, r))*relative_tol
+            # print(r)
+            r0 = r.copy()  # 保存初始残差 r0
+            alpha = 0
+            count = 0
+            if if_info!=0:
+                a = " "*(level)
+                print(a, "level = ", level, cp.sqrt(cp.vdot(r, r)))
+
+
+            # 主迭代循环
+            for k in range(max_iter):
+
+                p = lattice.apply_mat(r, self.mg_ops[level])
+
+                count += 1
+
+                
+                # 计算步长 alpha
+                alpha = cp.vdot(p, r) / cp.vdot(p, p)
+                # print("alpha = ", alpha)
+                        
+                x += alpha * r
+
+                # 更新中间残差 r_1 = r - alpha * Ap
+                r = r - alpha * p
+
+                # 检查是否收敛
+                if if_info!=0:
+                    a = " "*(level)
+                    print(a, "level = ", level, cp.sqrt(cp.vdot(r, r)))
+
+                if cp.sqrt(cp.vdot(r, r)) < tol:
+                    if if_info!=0:
+                        a = " "*(level)
+                        print(a, "level = ", level, "RelRes", cp.sqrt(cp.vdot(r, r))/cp.sqrt(cp.vdot(r0, r0)))
+                        # print("count = ",count)
+                    info.count = count
+                    info.norm_r = cp.sqrt(cp.vdot(r, r))
+                    info.r = r.copy()
+                    return x
+            info.if_max_iter=1
+            return x
+
+
+
+    def mg_gcr_recursive(self, b, max_iter=300, tol=1e-10, if_info=1, info = bicgstab.cg_info(), level=0, relative_tol=0):
+        x = cp.zeros_like(b)
+
+        if level < self.n_refine+1:
+            # 计算初始残差 r = b - Ax
+            r = b - lattice.apply_mat(x, self.mg_ops[level])
+            if relative_tol != 0:
+                tol = cp.sqrt(cp.vdot(r, r))*relative_tol
+            # print(r)
+            r0 = r.copy()  # 保存初始残差 r0
+            alpha = 1
+            count = 0
+            if if_info!=0:
+                a = " "*(level)
+                print(a, "level = ", level, cp.sqrt(cp.vdot(r, r)))
+            
+            p_store = []
+            Ap_store = []
+
+            z1 = self.mg_minres(r, max_iter=2, tol=0, if_info=0,  level=level)
+            r1 = r-lattice.apply_mat(z1, self.mg_ops[level])
+            #下潜
+            r_coarse = self.zeros_like_fermi(level=level+1)
+            self.restrict_f2c(level, r1, r_coarse)
+
+            #递归 z = M^(-1) r
+            info_c = bicgstab.cg_info()
+            relative_tol=0.25
+            if level+1 == self.n_refine:
+                e_coarse =  bicgstab.bicgstab(r_coarse, op=self.mg_ops[level+1], if_info=0, relative_tol=0.01, info=info_c)
+            else:
+                e_coarse = self.mg_gcr_recursive(r_coarse, level=level+1, info=info_c, relative_tol=0.25, if_info=1, max_iter=10)
+            # e_coarse =  bicgstab.bicgstab(r_coarse, op=self.mg_ops[level+1], if_info=0, relative_tol=0.001, info=info_c)
+            a = " "*(level+1)
+            print(a, "level", level+1, " ", "iter", info_c.count)
+            
+
+            #上浮
+            z2 = self.zeros_like_fermi(level=level)
+            z_fine = self.zeros_like_fermi(level=level)
+            self.prolong_c2f(level, e_coarse, z2)
+            z_fine += z2 + z1
+            p = z_fine.copy()
+            Ap = lattice.apply_mat(p, self.mg_ops[level])
+
+                
+            
+            
+
+            # 主迭代循环
+            for k in range(max_iter):
+
+                p_store.append(p)
+                Ap_store.append(Ap)
+
+                count += 1
+                # 计算 Ap = A * p
+                Ap = lattice.apply_mat(p, self.mg_ops[level])
+                
+                # 计算步长 alpha
+                alpha = cp.vdot(Ap, r) / cp.vdot(Ap, Ap)
+                # print("alpha = ", alpha)
+                        
+                x += alpha * p
+
+                # 更新中间残差 r_1 = r - alpha * Ap
+                r = r - alpha * Ap
+
+                # 检查是否收敛
+                if if_info!=0:
+                    a = " "*(level)
+                    print(a, "level = ", level, cp.sqrt(cp.vdot(r, r)))
+
+                if cp.sqrt(cp.vdot(r, r)) < tol:
+                    
+                    if if_info!=0:
+                        a = " "*(level)
+                        print(a, "level = ", level, "RelRes", cp.sqrt(cp.vdot(r, r))/cp.sqrt(cp.vdot(r0, r0)))
+                        # print("count = ",count)
+                    info.count = count
+                    info.norm_r = cp.sqrt(cp.vdot(r, r))
+                    info.r = r.copy()
+                    return x
+                
+               
+                
+                if level == 0:
+                    a=0
+                    print("tol=",tol)
+                if level < self.n_refine:
+                    z1 = self.mg_minres(r, max_iter=2, tol=0, if_info=0,  level=level)
+                    r1 = r-lattice.apply_mat(z1, self.mg_ops[level])
+
+                    #下潜
+                    r_coarse = self.zeros_like_fermi(level=level+1)
+                    self.restrict_f2c(level, r1, r_coarse)
+
+                    #递归 z = M^(-1) r
+                    info_c = bicgstab.cg_info()
+                    relative_tol=0.25
+                    if level+1 == self.n_refine:
+                        e_coarse =  bicgstab.bicgstab(r_coarse, op=self.mg_ops[level+1], if_info=0, relative_tol=0.01, info=info_c)
+                    else:
+                        e_coarse = self.mg_gcr_recursive(r_coarse, level=level+1, info=info_c, relative_tol=relative_tol, if_info=1, max_iter=10)
+                    a = " "*(level+1)
+                    print(a, "level", level+1, " ", "iter", info_c.count)
+                    
+
+                    #上浮
+                    z2 = self.zeros_like_fermi(level=level)
+                    z_fine = self.zeros_like_fermi(level=level)
+                    self.prolong_c2f(level, e_coarse, z2)
+                    z_fine += z2 + z1
+                    Az = lattice.apply_mat(z_fine, self.mg_ops[level])
+
+                    p[:] = z_fine[:]
+                    Ap[:] = Az[:]
+
+                    # p[:] = r[:]
+                    # Ar = lattice.apply_mat(r, self.mg_ops[level])
+                    # Ap[:] = Ar[:]
+
+                    for ii in range(0,k+1):
+                        beta_ij = -cp.vdot(Ap_store[ii], Az)/cp.vdot(Ap_store[ii], Ap_store[ii])
+                        p += beta_ij*p_store[ii]
+                        Ap += beta_ij*Ap_store[ii]
+
+
+
+                else:
+                    a=0
+                    # x_stack[-1] = x
+
+
+
+            # 如果未收敛，抛出错误
+            a = " "*(level)
+            print(a, "level", level, "over max_iter")
             info.if_max_iter=1
             return x
 
@@ -486,12 +707,15 @@ class mg:
             print("level = ",level,"   ")
 
 
-
-
-    def mg_bicgstab(self, b,op=0,  x0=None, max_iter=300, tol=1e-10, if_info=0, info = bicgstab.cg_info(), relative_tol=0.1):
-
-        X = self.mg_bicgstab_recursive( b, max_iter=300, tol=1e-10, info = info, level=0, relative_tol=1e-8)
-        print("mg_bicgstab.count = ", info.count)
+    def mg_bicgstab(self, b,op=0,  x0=None, max_iter=3000, tol=1e-10, if_info=0, info = bicgstab.cg_info(), relative_tol=0):
+        buf = 1
+        if buf==0:
+            X = self.mg_bicgstab_recursive( b, max_iter=max_iter, tol=tol, info = info, level=0, relative_tol=0)
+            print("mg_bicgstab_recursive.count = ", info.count)
+        else:
+            X = self.mg_gcr_recursive( b, max_iter=max_iter, tol=tol, info = info, level=0, relative_tol=0)
+            print("mg_gcr_recursive.count = ", info.count)
+        return X
     
     
         

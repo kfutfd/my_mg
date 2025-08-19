@@ -68,7 +68,8 @@ class operator_para:
         
         if self.if_fine != 0:
             print(self.hopping.shape)
-            kappa = -0.137
+            ma = -0#-0.4375
+            kappa = -1/(2*(ma + 4))
             self.hopping[0,:] = kappa*cp.roll(self.U[0,:], -1, axis=0)   #x+
             self.hopping[1,:] = kappa*cp.conj(self.U[0,:]).transpose(0,1,3,2)               #x- 
             self.hopping[2,:] = kappa*cp.roll(self.U[1,:], -1, axis=1)   #y+
